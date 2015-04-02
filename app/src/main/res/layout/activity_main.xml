@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical" >
+
+    <WebView
+        android:id="@+id/webview"
+        android:layout_width="fill_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <RelativeLayout
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:gravity="bottom"
+         >
+        <Button
+            android:id="@+id/buttonAudioPlayStop"
+            android:onClick="buttonAudioPlayStopClick"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingLeft="16dp"
+            android:layout_alignParentLeft="true"
+            android:text="@string/buttonAudioText"
+            android:drawablePadding="4dp"
+            android:drawableLeft="@drawable/start_audio"
+            style="?android:attr/borderlessButtonStyle"
+             />
+
+        <Button
+            android:id="@+id/buttonVideoPlayStop"
+            android:onClick="buttonVideoPlayStopClick"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingRight="16dp"
+            android:layout_alignParentRight="true"
+            android:text="@string/buttonVideoText"
+            android:drawablePadding="4dp"
+            android:drawableLeft="@drawable/start_video"
+            style="?android:attr/borderlessButtonStyle"
+             />
+    </RelativeLayout>
+
+</LinearLayout>

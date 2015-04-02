@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">Rakoty</string>
+    <string name="buttonAudioText"> Play Audio</string>
+    <string name="buttonAudioTextStop"> Stop Audio</string>
+    <string name="buttonVideoText"> Play Video</string>
+    <string name="menu_settings">Settings</string>
+
+</resources>
