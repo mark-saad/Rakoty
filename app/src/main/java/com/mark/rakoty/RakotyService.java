@@ -20,8 +20,6 @@ import android.media.MediaPlayer.OnPreparedListener;
 import android.media.MediaPlayer.OnSeekCompleteListener;
 import android.os.IBinder;
 import android.support.v4.app.NotificationCompat;
-import android.telephony.PhoneStateListener;
-import android.telephony.TelephonyManager;
 import android.widget.Toast;
 
 public class RakotyService extends Service implements
@@ -29,21 +27,19 @@ public class RakotyService extends Service implements
 		OnErrorListener, OnSeekCompleteListener, OnInfoListener {
 
 	private MediaPlayer mediaPlayer;
-	//WifiLock wifiLock;
 	private String strAudioLink;
 	// setup a notification ID
 	private static final int NOTIFICATION_ID = 1;
-	// call management
-	private boolean isPausedInCall = false;
-	private PhoneStateListener phoneStateListener;
-	private TelephonyManager telephonyManager;
 	// setup broadcast identifier and intent
 	public static final String BROADCAST_BUFFER = "com.mark.rakoty.broadcastbuffer";
 	Intent bufferIntent;
 	// declare headset switch variable
 	private int headsetSwitch = 1;
+    // Audio Manager variables
+    AudioManager audioManager;
+    AudioManager.OnAudioFocusChangeListener audioFocusChangeListener;
 
-	@Override
+    @Override
 	public void onCreate() {
 
 		mediaPlayer  = new MediaPlayer();
@@ -56,83 +52,85 @@ public class RakotyService extends Service implements
 		mediaPlayer.setOnErrorListener(this);
 		mediaPlayer.setOnSeekCompleteListener(this);
 		mediaPlayer.setOnInfoListener(this);
-		mediaPlayer.reset();
-		/**
-		mediaPlayer.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
-		
-		wifiLock = ((WifiManager) getSystemService(Context.WIFI_SERVICE))
-			    .createWifiLock(WifiManager.WIFI_MODE_FULL, "mylock");
-		wifiLock.acquire();
-		*/
+
 		// register headset receiver
 		registerReceiver(headsetReceiver, new IntentFilter(Intent.ACTION_HEADSET_PLUG));
-
 	}
 
 	@Override
 	public int onStartCommand(Intent intent, int flags, int startId) {
-		// Manage incoming phone calls during media play
-		telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
-		phoneStateListener = new PhoneStateListener() {
-			@Override
-			public void onCallStateChanged(int state, String incomingNumber) {
-				switch (state) {
-				case TelephonyManager.CALL_STATE_OFFHOOK:
-				case TelephonyManager.CALL_STATE_RINGING:
-					if (mediaPlayer != null) {
-						//pauseMedia();
-						stopMedia();
-						isPausedInCall = true;
-					}
-					break;
-				case TelephonyManager.CALL_STATE_IDLE:
-					if (mediaPlayer != null && isPausedInCall) {
-						isPausedInCall = false;
-						playMedia();
-					}
-					break;
-				}
-			}
-		};
-		telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
-
-		// Start Notification
+        // Manage audio focus
+        if(!isAudioFocusGranted()) {
+            return START_NOT_STICKY;
+        }
+        // Start Notification
 		initNotification();
 		strAudioLink = intent.getExtras().getString("AudioLink");
-		mediaPlayer.reset();
 		if (!mediaPlayer.isPlaying()) {
 			try {
-				mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
-				mediaPlayer.setDataSource(strAudioLink);
-				// send message to activity to prepare dialogue
-				sendbufferingBroadcast();
-				// prepare media player
-				mediaPlayer.prepareAsync();
+				playMedia();
 			} catch (IllegalArgumentException e) {
 				e.printStackTrace();
 			} catch (IllegalStateException e) {
-				e.printStackTrace();
-			} catch (IOException e) {
 				e.printStackTrace();
 			}
 		}
 		return START_STICKY;
 	}
 
-	protected void playMedia() {
-		if(!mediaPlayer.isPlaying())
-			mediaPlayer.start();
-	}
+    private boolean isAudioFocusGranted() {
+        audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
+        audioFocusChangeListener = new AudioManager.OnAudioFocusChangeListener() {
+            public void onAudioFocusChange(int focusChange) {
+                if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT){
+                    // Stop playback
+                    stopMedia();
+                } else if (focusChange == AudioManager.AUDIOFOCUS_GAIN) {
+                    // Resume playback
+                    playMedia();
+                } else if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
+                    audioManager.abandonAudioFocus(audioFocusChangeListener);
+                    // Stop playback and stop service
+                    stopMedia();
+                    stopSelf();
+                }
+            }
+        };
+        // Request audio focus for playback
+        int result = audioManager.requestAudioFocus(audioFocusChangeListener,
+                // Use the music stream.
+                AudioManager.STREAM_MUSIC,
+                // Request permanent focus.
+                AudioManager.AUDIOFOCUS_GAIN);
 
-	protected void pauseMedia() {
-		if (mediaPlayer. isPlaying())
-			mediaPlayer.pause();
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            //audioManager.registerMediaButtonEventReceiver(componentRemoteControlReceiver);
+            // Start playback.
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+
+	protected void playMedia()  {
+        mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+        try {
+            mediaPlayer.setDataSource(strAudioLink);
+        }catch (IOException e){
+            e.printStackTrace();
+        }
+        // send message to activity to prepare dialogue
+        sendbufferingBroadcast();
+        // prepare media player
+        mediaPlayer.prepareAsync();
 	}
 
 	protected void stopMedia(){
-		if(mediaPlayer.isPlaying())
-			mediaPlayer.stop();
-		stopSelf();
+		if(mediaPlayer.isPlaying()) {
+            mediaPlayer.stop();
+            mediaPlayer.reset();
+        }
 	}
 	
 	@Override
@@ -141,14 +139,10 @@ public class RakotyService extends Service implements
 		if (mediaPlayer != null) {
 			stopMedia();
 			mediaPlayer.release();
-			//wifiLock.release();
+			mediaPlayer = null;
 		}
 		// Stop Notification
 		cancelNotification();
-		// Stop phone state listener
-		if(phoneStateListener!=null){
-			telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE);
-		}
 		// Reset play button
 		resetButtonPlayStopBroadcast();
 		// Unregister headset receiver
@@ -218,6 +212,7 @@ public class RakotyService extends Service implements
 		// Stop Media and end the service
 		if (mediaPlayer.isPlaying()) {
 			mediaPlayer.stop();
+            mediaPlayer.reset();
 		}
 		stopSelf();
 	}
@@ -248,41 +243,12 @@ public class RakotyService extends Service implements
 		Notification notification = notificationBuilder.build();
 		myNotificationManager.notify(NOTIFICATION_ID, notification);
 		startForeground(NOTIFICATION_ID, notification);
-
-		/**
-		 * // The stack builder object will contain an artificial back stack for
-		 * the // started Activity. // This ensures that navigating backward
-		 * from the Activity leads out of // your application to the Home
-		 * screen. TaskStackBuilder stackBuilder =
-		 * TaskStackBuilder.create(this); // Adds the back stack for the Intent
-		 * (but not the Intent itself)
-		 * stackBuilder.addParentStack(AudioActivity.class); // Adds the Intent
-		 * that starts the Activity to the top of the stack
-		 * stackBuilder.addNextIntent(notificationIntent); PendingIntent
-		 * contentIntent = stackBuilder.getPendingIntent( 0,
-		 * PendingIntent.FLAG_UPDATE_CURRENT );
-		 * notificationBuilder.setContentIntent(contentIntent);
-		 * NotificationManager mNotificationManager = (NotificationManager)
-		 * getSystemService(Context.NOTIFICATION_SERVICE); // mId allows you to
-		 * update the notification later on.
-		 */
-
-		/**
-		 * Notification myNotification = new Notification.Builder(myContext)
-		 * .setContentTitle
-		 * ("My Player").setContentText(tickerText).setSmallIcon(
-		 * icon).setTicker("This is a ticker").
-		 * setContentIntent(contentIntent).build();
-		 */
-		// myNotificationManager.notify(NOTIFICATION_ID, myNotification);
-		// myNotification.flags = Notification.FLAG_ONGOING_EVENT;
 	}
 
 	private void cancelNotification() {
 		String ns = Context.NOTIFICATION_SERVICE;
 		NotificationManager myNotificationManager = (NotificationManager) getSystemService(ns);
 		myNotificationManager.cancel(NOTIFICATION_ID);
-
 	}
 
 	/**
@@ -302,18 +268,18 @@ public class RakotyService extends Service implements
 	}
 	
 	private BroadcastReceiver headsetReceiver = new BroadcastReceiver() {
-		private boolean headsetConnected = false;
+		private boolean isHeadsetConnected = false;
 		
 		@Override
 		public void onReceive(Context context, Intent intent) {
 			// 
 			if(intent.hasExtra("state")){
-				if(headsetConnected && intent.getIntExtra("state",0)==0){
-					headsetConnected = false;
+				if(isHeadsetConnected && intent.getIntExtra("state",0)==0){
+					isHeadsetConnected = false;
 					headsetSwitch = 0;
 				}
-				else if(!headsetConnected && intent.getIntExtra("state",0)==1){
-					headsetConnected = true;
+				else if(!isHeadsetConnected && intent.getIntExtra("state",0)==1){
+					isHeadsetConnected = true;
 					headsetSwitch = 1;
 				}
 			}
@@ -330,12 +296,14 @@ public class RakotyService extends Service implements
 	
 	private void headsetDisconnected(){
 		// Stop Media and end the service
-				if (mediaPlayer.isPlaying()) {
-					mediaPlayer.stop();
-				}
-				stopSelf();
+        if(mediaPlayer.isPlaying()) {
+            stopMedia();
+            resetButtonPlayStopBroadcast();
+            stopSelf();
+        }
 	}
-	// send message to activity to reset the play button
+
+    // send message to activity to reset the play button
 	private void resetButtonPlayStopBroadcast() {
 		bufferIntent.putExtra("buffering", "0");
 		sendBroadcast(bufferIntent);
